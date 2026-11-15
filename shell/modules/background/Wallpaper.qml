@@ -133,7 +133,7 @@ Item {
                             id: selectWallText
 
                             anchors.centerIn: parent
-                            text: qsTr("Set it now!")
+                            text: qsTr("Set wallpaper")
                             color: Colours.palette.m3onPrimary
                             font: Tokens.font.body.large
                         }
@@ -303,17 +303,24 @@ Item {
                         root.current = img;
                 }
             }
-            CachingVideo {
+            // Only for a video: any multimedia object loads Qt's FFmpeg backend, whose hardware
+            // probe opens CUDA and keeps a hybrid laptop's NVIDIA GPU awake.
+            Loader {
                 id: wallpaperVideo
 
+                readonly property bool playing: (item as CachingVideo)?.playing ?? false
+
                 anchors.fill: parent
-                path: img.videoPath
-                screen: root.screen
-                visible: img.isVideoImage && img.videoPath !== ""
-                fillMode: Config.background.wallpaperFillMode
-                onPlayingChanged: {
-                    if (playing && img.isVideoImage)
-                        root.current = img;
+                active: img.isVideoImage && img.videoPath !== ""
+
+                sourceComponent: CachingVideo {
+                    path: img.videoPath
+                    screen: root.screen
+                    fillMode: Config.background.wallpaperFillMode
+                    onPlayingChanged: {
+                        if (playing && img.isVideoImage)
+                            root.current = img;
+                    }
                 }
             }
         }

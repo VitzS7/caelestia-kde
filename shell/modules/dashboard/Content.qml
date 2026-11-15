@@ -21,6 +21,7 @@ Item {
         const allTabs = [
             {
                 component: dashComponent,
+                keepAlive: true,
                 iconName: "dashboard",
                 text: qsTr("Dashboard"),
                 enabled: Config.dashboard.showDashboard
@@ -39,6 +40,7 @@ Item {
             },
             {
                 component: weatherComponent,
+                keepAlive: true,
                 iconName: "cloud",
                 text: qsTr("Weather"),
                 enabled: Config.dashboard.showWeather
@@ -70,6 +72,25 @@ Item {
 
     implicitWidth: nonAnimWidth
     implicitHeight: nonAnimHeight
+
+    // Builds the keepAlive tabs one at a time shortly after start, so the first open is as
+    // cheap as the next ones.
+    Timer {
+        interval: 1500
+        repeat: true
+        running: true
+
+        onTriggered: {
+            for (let i = 0; i < repeater.count; i++) {
+                const loader = repeater.itemAt(i);
+                if (loader && loader.modelData.keepAlive && !loader.keepLoaded) {
+                    loader.keepLoaded = true;
+                    return;
+                }
+            }
+            stop();
+        }
+    }
 
     Tabs {
         id: tabs
@@ -164,13 +185,13 @@ Item {
                         // Stays loaded once shown, so switching tabs does not rebuild it.
                         property bool keepLoaded: false
 
-                        readonly property bool inView: {
-                            const vx = Math.floor(view.visibleArea.xPosition * view.contentWidth);
-                            const vex = Math.floor(vx + view.visibleArea.widthRatio * view.contentWidth);
-                            return (vx >= x && vx <= x + implicitWidth) || (vex >= x && vex <= x + implicitWidth);
-                        }
+                        // Neighbours are loaded while dragging. Index based on purpose: reading x or
+                        // implicitWidth here depends on this Loader's own content (binding loop).
+                        readonly property bool preloadNeighbour: view.moving && Math.abs(index - view.currentIndex) === 1
 
-                        active: root.visibilities.dashboard && (keepLoaded || index === view.currentIndex || inView)
+                        // Light tabs (keepAlive) stay loaded while the dashboard is closed, so reopening it
+                        // does not rebuild them. The dashboard is hidden then, and their services follow `visible`.
+                        active: (modelData.keepAlive && keepLoaded) || (root.visibilities.dashboard && (keepLoaded || index === view.currentIndex || preloadNeighbour))
 
                         onActiveChanged: {
                             if (active)

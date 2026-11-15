@@ -19,7 +19,10 @@ import sys
 import unittest
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -373,12 +376,12 @@ class ShellSurfaceTests(unittest.TestCase):
 
         state = (ROOT / "shell" / "modules" / "nexus" / "NexusState.qml").read_text(encoding="utf-8")
         self.assertIn(
-            "property int pendingSubPageIdx",
+            "property string pendingSubPageKey",
             state,
             "the request has to outlive the page swap, so it needs somewhere to wait",
         )
         self.assertIn(
-            "function goToSubPage(pageIdx: int, subPageIdx: int)",
+            "function goToSubPage(pageIdx: int, subPageKey: string)",
             state,
             "page plus sub-page navigation needs one entry point that knows about the swap",
         )
@@ -387,32 +390,27 @@ class ShellSurfaceTests(unittest.TestCase):
             ROOT / "shell" / "modules" / "nexus" / "common" / "StackPage.qml"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "nState.pendingSubPageIdx",
+            "nState.pendingSubPageKey",
             stack,
             "the incoming page is the only one that can open a queued sub-page",
         )
 
     def test_the_font_controls_are_reachable_from_search(self) -> None:
-        """Search is driven by PageDictionary, so a section missing from it is invisible.
+        """Search is driven by PageCompRegistry and PageRowIndex, so setting rows must be indexed.
 
-        The Appearance page holds the font and monospace font pickers, but the only
-        entry that mentioned fonts was the page description, so searching "font"
-        returned the page and nothing that leads to those pickers.
+        The Appearance and Accessibility pages hold the font pickers and font scale rows.
+        They must be present in PageRowIndex.qml so searching "font" reaches them.
         """
         lines = (
-            ROOT / "shell" / "modules" / "nexus" / "PageDictionary.qml"
+            ROOT / "shell" / "modules" / "nexus" / "PageRowIndex.qml"
         ).read_text(encoding="utf-8").splitlines()
 
         for label in ("Font", "Monospace font", "Font scale"):
             entries = [line for line in lines if f'label: qsTr("{label}")' in line]
-            self.assertTrue(entries, f'"{label}" must be a searchable settings entry')
-            self.assertTrue(
-                any("font" in line.lower() for line in entries),
-                f'the "{label}" entry needs a font keyword, or searching "font" misses it',
-            )
+            self.assertTrue(entries, f'"{label}" must be a searchable settings entry in PageRowIndex.qml')
 
     def test_every_settings_subpage_is_reachable_from_search(self) -> None:
-        """PageDictionary is the only thing search indexes, so a page missing from it is a dead end.
+        """PageCompRegistry subpages must be reachable from search, so a page missing from it is a dead end.
 
         Nothing else notices: the page still renders and is still reachable by
         clicking through, so a sub-page can sit unsearchable indefinitely. The
@@ -441,24 +439,27 @@ class ShellSurfaceTests(unittest.TestCase):
         list was "Merge pull request #697 from somebody/branch" and the type was
         printed twice, once as a chip and once as the "fix(scope):" prefix.
         """
+        model = (
+            ROOT / "shell" / "modules" / "nexus" / "common" / "updateModel.js"
+        ).read_text(encoding="utf-8")
         timeline = (
             ROOT / "shell" / "modules" / "nexus" / "common" / "UpdateTimeline.qml"
         ).read_text(encoding="utf-8")
 
-        self.assertNotIn(
-            'text: entry.modelData.subject || ""',
-            timeline,
-            "the raw subject must be rewritten before it is rendered",
-        )
         self.assertIn(
-            "function mergedSubject",
-            timeline,
+            "function mergeSubject",
+            model,
             "a pull-request merge must be shown as what landed, not as the merge itself",
         )
         self.assertIn(
-            "function typeStrippedSubject",
-            timeline,
+            "function strippedSubject",
+            model,
             "the type chip already names the commit type, so the subject must not repeat it",
+        )
+        self.assertNotIn(
+            "Merge pull request",
+            timeline,
+            "the rewrite belongs to the model, not to the row that renders it",
         )
 
     def test_the_dev_timeline_hides_merge_commits(self) -> None:
@@ -467,14 +468,27 @@ class ShellSurfaceTests(unittest.TestCase):
         The commit the running shell is installed at has to stay, though: it is how
         the timeline marks where the user is.
         """
+        model = (
+            ROOT / "shell" / "modules" / "nexus" / "common" / "updateModel.js"
+        ).read_text(encoding="utf-8")
         page = (
             ROOT / "shell" / "modules" / "nexus" / "pages" / "UpdatesPage.qml"
         ).read_text(encoding="utf-8")
 
         self.assertIn(
-            'filter(e => !e.isMerge || e.state === "current")',
+            'item.state === "current"',
+            model,
+            "the installed commit must survive the filtering that drops merges",
+        )
+        self.assertIn(
+            "if (item.isMerge)",
+            model,
+            "and merges are what that filtering drops",
+        )
+        self.assertNotIn(
+            "isMerge",
             page,
-            "merge commits must be dropped from the dev timeline, except the installed one",
+            "the page shows what the model decided rather than filtering again",
         )
 
     def test_the_shortcut_list_does_not_animate_endlessly(self) -> None:
@@ -933,8 +947,8 @@ class SubmoduleTests(unittest.TestCase):
         )
 
 
+@unittest.skipUnless(yaml is not None, "pyyaml required for YAML parse")
 class WorkflowYamlTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("python3"), "python3 required for YAML parse")
     def test_workflow_files_parse(self) -> None:
         """All .yml files in .github/workflows/ should be valid YAML."""
         workflows_dir = ROOT / ".github" / "workflows"
